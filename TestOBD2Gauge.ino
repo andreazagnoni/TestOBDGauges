@@ -11,11 +11,6 @@ IPAddress server(192, 168, 0, 10);
 WiFiClient client;
 ELM327 myELM327;
 
-// PARAMETRI CONNESSIONE
-int connection_attempts = 0;
-const int max_attempts = 15;  // Proverà per circa 20-30 secondi totali
-bool obd_ready = false;
-
 // PIN SCHERMO
 #define TFT_SCLK 6
 #define TFT_MOSI 7
@@ -38,39 +33,6 @@ static const uint32_t screenWidth = 240;
 static const uint32_t screenHeight = 240;
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[screenWidth * 30];
-
-bool connect_to_obd() {
-  Serial.printf("Tentativo %d di %d...\n", connection_attempts + 1, max_attempts);
-
-  // 1. Verifica/Connetti WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    WiFi.begin(ssid);
-    unsigned long startWait = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - startWait < 5000) {
-      lv_timer_handler();  // Mantieni la UI attiva durante l'attesa
-      delay(10);
-    }
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("WiFi OK, provo socket client...");
-    if (client.connect(server, 35000)) {
-      Serial.println("Socket OK, inizializzo ELM327...");
-      if (myELM327.begin(client, true, 2000)) {
-        // Inviamo un comando AT per testare se il chip risponde davvero
-        myELM327.sendCommand("ATI");
-        delay(500);
-        if (myELM327.get_response() == ELM_SUCCESS) {
-          Serial.println("Sistema OBD Pronto!");
-          return true;
-        }
-      }
-    }
-  }
-
-  connection_attempts++;
-  return false;
-}
 
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
   uint32_t w = (area->x2 - area->x1 + 1);
@@ -161,20 +123,22 @@ void test_obd_readings() {
   if (millis() - last_obd_request_time < obd_interval && currentTest == READ_WATER) {
     return;
   }
-
+  Serial.println("\nInizio Giro:");
   switch (currentTest) {
     case READ_WATER:
       {
+        Serial.println("\nRecupero valore temp acqua:");
         float waterTemp = myELM327.engineCoolantTemp();
         if (myELM327.nb_rx_state == ELM_SUCCESS) {
 
-          Serial.print("Temp Acqua: ");
+          Serial.print("\nTemp Acqua: ");
           Serial.println(waterTemp);
 
           WaterTemperatureReading((int)waterTemp);
 
           currentTest = READ_OIL;  // Passa all'olio
         } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
+          myELM327.printError();
           currentTest = READ_OIL;  // Salta se errore
         }
         break;
@@ -182,10 +146,11 @@ void test_obd_readings() {
     case READ_OIL:
       {
         // Comando specifico per Temperatura Olio BMW M54
+        Serial.println("\nRecupero valore temp olio:");
         float oilTemp = myELM327.oilTemp();
         if (myELM327.nb_rx_state == ELM_SUCCESS) {
 
-          Serial.print("Temp Olio: ");
+          Serial.print("\nTemp Olio: ");
           Serial.println(oilTemp);
 
           OilTemperatureReading((int)oilTemp);
@@ -193,6 +158,7 @@ void test_obd_readings() {
           last_obd_request_time = millis();  // Reset timer dei 5 secondi
           currentTest = READ_WATER;          // Ricomincia il giro
         } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
+          myELM327.printError();
           last_obd_request_time = millis();
           currentTest = READ_WATER;
         }
@@ -201,10 +167,20 @@ void test_obd_readings() {
   }
 }
 
+void gestione_errori(){
+  lv_scr_load_anim(ui_ErrorScreen, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+    unsigned long start_time = millis();
+    while(millis() - start_time < 500) { // Ciclo di mezzo secondo
+        lv_timer_handler();
+        delay(5);
+    }
+    while (1)
+      ;
+}
+
 void setup() {
   Serial.begin(115200);
-
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_AP);
 
   gfx->begin();
   pinMode(TFT_BL, OUTPUT);
@@ -236,25 +212,75 @@ void setup() {
 
   ui_init();
 
-  Serial.println("Setup completato!");
-  while (!obd_ready && connection_attempts < max_attempts) {
-    if (connect_to_obd()) {
-      obd_ready = true;
-    } else {
-      delay(1000);  // Aspetta un secondo prima del prossimo tentativo
-    }
-    lv_timer_handler();  // Permette alle animazioni di caricamento di girare
+  Serial.println("Setup display completato!");
+
+  WiFi.begin(ssid);
+
+  int MaxmsRetry = 20000;
+  int startMillis = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startMillis <= MaxmsRetry) {
+    lv_timer_handler();
+    Serial.print(".");
   }
 
-  // 3. Gestione finale
-  if (obd_ready) {
-    Serial.println("Tutto pronto, vado alla dashboard.");
-    lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
-  } else {
-    Serial.println("Connessione fallita definitivamente.");
-    // Carica una schermata di errore o scrivi un messaggio
-    lv_scr_load_anim(ui_ErrorScreen, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  if(WiFi.status() != WL_CONNECTED){
+    Serial.println("\nErrore Connessione Wifi!");
+    gestione_errori();
   }
+
+  Serial.println("Connected to WiFi!");
+
+  int attemptNumber = 0;
+  bool clientConnected = false;
+  while (attemptNumber < 5 && clientConnected == false) {
+    if (client.connect(server, 35000)) {
+      clientConnected = true;
+      Serial.println("Client connected!");
+    } else {
+      lv_timer_handler();
+      Serial.println("Error client retrying...");
+      attemptNumber = attemptNumber + 1;
+      delay(1000);
+    }
+  }
+
+  if (!clientConnected) {
+    Serial.println("Errore Connessione Client!");
+    gestione_errori();
+  }
+
+  int ElmAttemptNumber = 0;
+  bool ElmConnected = false;
+  while (ElmAttemptNumber < 5 && ElmConnected == false) {
+    if (!myELM327.begin(client, true, 2000)) {
+      lv_timer_handler();
+      Serial.println("error elm retrying...");
+      ElmAttemptNumber = ElmAttemptNumber + 1;
+      delay(1000);
+    } else {
+      Serial.println("ELM connected!");
+      ElmConnected = true;
+    }
+  }
+
+  if (!ElmConnected) {
+    Serial.println("Errore Connessione ELM!");
+    gestione_errori();
+  }
+
+  Serial.println("setup ELM completato!");
+  myELM327.sendCommand("AT AT 1");  // Adaptive Timing (Fondamentale per BMW vecchie)
+  delay(100);
+  myELM327.sendCommand("AT ST 64"); // Imposta un timeout di risposta di 400ms (più rilassato)
+  delay(100);
+  myELM327.sendCommand("AT SP 0");  // Auto-protocollo
+  delay(100);
+  lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  unsigned long start_time = millis();
+    while(millis() - start_time < 500) { // Ciclo di mezzo secondo
+        lv_timer_handler();
+        delay(5);
+    }
 }
 
 void loop() {
@@ -263,6 +289,5 @@ void loop() {
   if (WiFi.status() == WL_CONNECTED) {
     test_obd_readings();
   }
-
   delay(5);
 }
