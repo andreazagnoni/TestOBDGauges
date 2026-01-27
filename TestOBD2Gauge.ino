@@ -108,74 +108,67 @@ void WaterTemperatureReading(int temp) {
 }
 
 
-//TESTING ----------------------------------------------------
-// Timer per l'intervallo di 5 secondi
+// --- MODIFICHE ALLA SEZIONE TESTING ---
+
 uint32_t last_obd_request_time = 0;
-const uint32_t obd_interval = 5000;
+const uint32_t obd_interval = 4000;  // Ridotto leggermente a 4s per bilanciare
+uint8_t error_count = 0;             // Conta i timeout consecutivi
 
-// Stati per alternare i due valori
-enum TestState { READ_WATER,
+enum TestState { SEND_WATER,
+                 READ_WATER,
+                 SEND_OIL,
                  READ_OIL,
-                 IDLE };
-TestState currentTest = READ_WATER;
+                 REINIT_ELM };
+TestState currentTest = SEND_WATER;
+
 void test_obd_readings() {
-  // Se non sono passati 5 secondi, non fare nulla (IDLE)
-  if (millis() - last_obd_request_time < obd_interval && currentTest == READ_WATER) {
-    return;
-  }
-  Serial.println("\nInizio Giro:");
+  static uint32_t last_attempt_time = 0;
+
+  if (currentTest == SEND_WATER && (millis() - last_obd_request_time < 4000)) return;
+
   switch (currentTest) {
+    case SEND_WATER:
+      while (client.available()) client.read();
+      myELM327.sendCommand("0105");
+      last_attempt_time = millis();
+      currentTest = READ_WATER;
+      break;
+
     case READ_WATER:
-      {
-        Serial.println("\nRecupero valore temp acqua:");
-        float waterTemp = myELM327.engineCoolantTemp();
-        if (myELM327.nb_rx_state == ELM_SUCCESS) {
+      if (myELM327.get_response() == ELM_SUCCESS) {
+        char responseStr[64] = { 0 };
+        for (int i = 0; i < 60; i++) responseStr[i] = (char)myELM327.payload[i];
 
-          Serial.print("\nTemp Acqua: ");
-          Serial.println(waterTemp);
-
-          WaterTemperatureReading((int)waterTemp);
-
-          currentTest = READ_OIL;  // Passa all'olio
-        } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
-          myELM327.printError();
-          currentTest = READ_OIL;  // Salta se errore
-        }
-        break;
-      }
-    case READ_OIL:
-      {
-        // Comando specifico per Temperatura Olio BMW M54
-        Serial.println("\nRecupero valore temp olio:");
-        float oilTemp = myELM327.oilTemp();
-        if (myELM327.nb_rx_state == ELM_SUCCESS) {
-
-          Serial.print("\nTemp Olio: ");
-          Serial.println(oilTemp);
-
-          OilTemperatureReading((int)oilTemp);
-
-          last_obd_request_time = millis();  // Reset timer dei 5 secondi
-          currentTest = READ_WATER;          // Ricomincia il giro
-        } else if (myELM327.nb_rx_state != ELM_GETTING_MSG) {
-          myELM327.printError();
+        char *pos = strstr(responseStr, "4105");
+        if (pos != NULL) {
+          int temp = (int)strtol(pos + 4, NULL, 16) - 40;
+          Serial.printf(">>> ACQUA OK: %d C\n", temp);
+          WaterTemperatureReading(temp);
           last_obd_request_time = millis();
-          currentTest = READ_WATER;
+          error_count = 0;
+          currentTest = SEND_WATER;  // Restiamo sull'acqua per ora!
         }
-        break;
+      } else if (millis() - last_attempt_time > 3000) {
+        Serial.println("!!! BUS ERROR - Forzo REINIT...");
+        // Se fallisce, proviamo a mandare un comando "sveglia"
+        //myELM327.sendCommand("ATSI");  // ISO Init (Sveglia manuale per protocollo 4)
+        delay(1000);
+        last_obd_request_time = millis();
+        currentTest = SEND_WATER;
       }
+      break;
   }
 }
 
-void gestione_errori(){
+void gestione_errori() {
   lv_scr_load_anim(ui_ErrorScreen, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
-    unsigned long start_time = millis();
-    while(millis() - start_time < 500) { // Ciclo di mezzo secondo
-        lv_timer_handler();
-        delay(5);
-    }
-    while (1)
-      ;
+  unsigned long start_time = millis();
+  while (millis() - start_time < 500) {  // Ciclo di mezzo secondo
+    lv_timer_handler();
+    delay(5);
+  }
+  while (1)
+    ;
 }
 
 void setup() {
@@ -223,7 +216,7 @@ void setup() {
     Serial.print(".");
   }
 
-  if(WiFi.status() != WL_CONNECTED){
+  if (WiFi.status() != WL_CONNECTED) {
     Serial.println("\nErrore Connessione Wifi!");
     gestione_errori();
   }
@@ -252,7 +245,7 @@ void setup() {
   int ElmAttemptNumber = 0;
   bool ElmConnected = false;
   while (ElmAttemptNumber < 5 && ElmConnected == false) {
-    if (!myELM327.begin(client, true, 2000)) {
+    if (!myELM327.begin(client, true, 4000)) {
       lv_timer_handler();
       Serial.println("error elm retrying...");
       ElmAttemptNumber = ElmAttemptNumber + 1;
@@ -269,18 +262,22 @@ void setup() {
   }
 
   Serial.println("setup ELM completato!");
-  myELM327.sendCommand("AT AT 1");  // Adaptive Timing (Fondamentale per BMW vecchie)
-  delay(100);
-  myELM327.sendCommand("AT ST 64"); // Imposta un timeout di risposta di 400ms (più rilassato)
-  delay(100);
-  myELM327.sendCommand("AT SP 0");  // Auto-protocollo
-  delay(100);
+  myELM327.sendCommand("ATZ");  // Reset
+  delay(2000);
+  myELM327.sendCommand("ATE0");  // Echo off
+  delay(500);
+  myELM327.sendCommand("ATSP5");  // CAMBIO PROTOCOLLO: Proviamo ISO 9141-2
+  delay(500);
+  myELM327.sendCommand("ATST64");  // Aumenta il timeout di risposta a 400ms
+  delay(500);
+  myELM327.sendCommand("ATSW00");  // Disabilita il wake-up automatico fastidioso
+  delay(500);
   lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
   unsigned long start_time = millis();
-    while(millis() - start_time < 500) { // Ciclo di mezzo secondo
-        lv_timer_handler();
-        delay(5);
-    }
+  while (millis() - start_time < 500) {  // Ciclo di mezzo secondo
+    lv_timer_handler();
+    delay(5);
+  }
 }
 
 void loop() {
