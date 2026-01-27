@@ -11,15 +11,22 @@ IPAddress server(192, 168, 0, 10);
 WiFiClient client;
 ELM327 myELM327;
 
-// PIN SCHERMO
+// TIMER E STATI
+uint32_t last_obd_request_time = 0;
+const uint32_t obd_interval = 5000;  // 5 secondi come richiesto
+enum TestState { SEND_WATER,
+                 READ_WATER,
+                 REINIT_BUS };
+TestState currentTest = SEND_WATER;
+uint8_t consecutive_errors = 0;
+
+// PIN SCHERMO (Invariati)
 #define TFT_SCLK 6
 #define TFT_MOSI 7
 #define TFT_CS 10
 #define TFT_DC 2
 #define TFT_RST -1
 #define TFT_BL 3
-
-// PIN TOUCH
 #define TOUCH_SDA 4
 #define TOUCH_SCL 5
 #define TOUCH_INT 0
@@ -33,6 +40,8 @@ static const uint32_t screenWidth = 240;
 static const uint32_t screenHeight = 240;
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t buf[screenWidth * 30];
+
+// --- FUNZIONI DI SUPPORTO ---
 
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
   uint32_t w = (area->x2 - area->x1 + 1);
@@ -51,84 +60,48 @@ void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data) {
   }
 }
 
-//region sensor readings
-
-void OilTemperatureReading(int temp) {
-  if (ui_OilTemperatureArc != NULL) {
-    lv_arc_set_value(ui_OilTemperatureArc, temp);
-    lv_event_send(ui_OilTemperatureArc, LV_EVENT_VALUE_CHANGED, NULL);
-
-    if (temp >= 130) {
-      bool blink = (millis() % 500) < 250;
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_MAIN);
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_OilTemperatureValue, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(255, 255, 255), 0);
-    } else {
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_color_make(34, 34, 34), LV_PART_MAIN);
-    }
-
-    if (temp <= 60) {
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_color_make(255, 255, 255), 0);
-    } else if (temp > 60 && temp <= 80) {
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_palette_main(LV_PALETTE_TEAL), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_color_make(255, 255, 255), 0);
-    } else if (temp > 80 && temp <= 110) {
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_color_make(0, 180, 50), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_color_make(255, 255, 255), 0);
-    } else if (temp > 110 && temp < 130) {
-      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_palette_main(LV_PALETTE_ORANGE), 0);
-    }
-  }
-}
-
 void WaterTemperatureReading(int temp) {
   if (ui_WaterTemperatureArc != NULL) {
     lv_arc_set_value(ui_WaterTemperatureArc, temp);
     lv_event_send(ui_WaterTemperatureArc, LV_EVENT_VALUE_CHANGED, NULL);
-
+    // Logica colori semplificata
     if (temp >= 115) {
-      bool blink = (millis() % 500) < 250;
-      lv_obj_set_style_arc_color(ui_WaterTemperatureArc, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_MAIN);
-      lv_obj_set_style_arc_color(ui_WaterTemperatureArc, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_WaterTemperatureValue, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(255, 255, 255), 0);
-    } else {
-      lv_obj_set_style_arc_color(ui_WaterTemperatureArc, lv_color_make(34, 34, 34), LV_PART_MAIN);
-    }
-
-    if (temp <= 70) {
+      lv_obj_set_style_arc_color(ui_WaterTemperatureArc, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
+    } else if (temp <= 70) {
       lv_obj_set_style_arc_color(ui_WaterTemperatureArc, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_WaterTemperatureValue, lv_color_make(255, 255, 255), 0);
-    } else if (temp > 70 && temp < 115) {
+    } else {
       lv_obj_set_style_arc_color(ui_WaterTemperatureArc, lv_color_make(0, 180, 50), LV_PART_INDICATOR);
-      lv_obj_set_style_text_color(ui_WaterTemperatureValue, lv_color_make(255, 255, 255), 0);
     }
   }
 }
 
+// --- LOGICA OBD CORAZZATA ---
 
-// --- MODIFICHE ALLA SEZIONE TESTING ---
-
-uint32_t last_obd_request_time = 0;
-const uint32_t obd_interval = 4000;  // Ridotto leggermente a 4s per bilanciare
-uint8_t error_count = 0;             // Conta i timeout consecutivi
-
-enum TestState { SEND_WATER,
-                 READ_WATER,
-                 SEND_OIL,
-                 READ_OIL,
-                 REINIT_ELM };
-TestState currentTest = SEND_WATER;
+void reinit_sequence() {
+  Serial.println("\n[SYSTEM] Esecuzione Reinit Hard...");
+  while (client.available()) client.read();
+  myELM327.sendCommand("ATZ");
+  delay(1500);  // Reset ELM
+  myELM327.sendCommand("ATE0");
+  delay(300);  // Echo Off
+  myELM327.sendCommand("ATS0");
+  delay(300);  // Spazi Off
+  myELM327.sendCommand("ATSP5");
+  delay(1000);  // BMW Protocol
+  myELM327.sendCommand("0100");
+  delay(1000);  // Wake up bus
+  consecutive_errors = 0;
+}
 
 void test_obd_readings() {
   static uint32_t last_attempt_time = 0;
 
-  if (currentTest == SEND_WATER && (millis() - last_obd_request_time < 4000)) return;
-
   switch (currentTest) {
     case SEND_WATER:
-      while (client.available()) client.read();
+      if (millis() - last_obd_request_time < obd_interval) return;
+
+      while (client.available()) client.read();  // Svuota buffer prima dell'invio
+      Serial.println("\n[OBD] Invio 0105...");
       myELM327.sendCommand("0105");
       last_attempt_time = millis();
       currentTest = READ_WATER;
@@ -139,26 +112,45 @@ void test_obd_readings() {
         char responseStr[64] = { 0 };
         for (int i = 0; i < 60; i++) responseStr[i] = (char)myELM327.payload[i];
 
+        Serial.printf("[OBD] Raw: %s\n", responseStr);
+
+        // Cerchiamo il codice risposta "4105" ignorando l'echo
         char *pos = strstr(responseStr, "4105");
-        if (pos != NULL) {
-          int temp = (int)strtol(pos + 4, NULL, 16) - 40;
-          Serial.printf(">>> ACQUA OK: %d C\n", temp);
-          WaterTemperatureReading(temp);
-          last_obd_request_time = millis();
-          error_count = 0;
-          currentTest = SEND_WATER;  // Restiamo sull'acqua per ora!
+        if (pos != NULL && strlen(pos) >= 6) {
+          char hexVal[3] = { pos[4], pos[5], '\0' };
+          int raw_val = (int)strtol(hexVal, NULL, 16);
+          int temp = raw_val - 40;
+
+          if (temp > -30 && temp < 150) {
+            Serial.printf(">>> ACQUA OK: %d C\n", temp);
+            WaterTemperatureReading(temp);
+            consecutive_errors = 0;
+          }
         }
-      } else if (millis() - last_attempt_time > 3000) {
-        Serial.println("!!! BUS ERROR - Forzo REINIT...");
-        // Se fallisce, proviamo a mandare un comando "sveglia"
-        //myELM327.sendCommand("ATSI");  // ISO Init (Sveglia manuale per protocollo 4)
-        delay(1000);
         last_obd_request_time = millis();
         currentTest = SEND_WATER;
+      } else if (millis() - last_attempt_time > 4000) {
+        Serial.println("[OBD] Errore/Timeout!");
+        consecutive_errors++;
+        last_obd_request_time = millis();
+
+        if (consecutive_errors >= 2) {
+          currentTest = REINIT_BUS;
+        } else {
+          currentTest = SEND_WATER;
+        }
       }
+      break;
+
+    case REINIT_BUS:
+      reinit_sequence();
+      currentTest = SEND_WATER;
+      last_obd_request_time = millis();
       break;
   }
 }
+
+// --- SETUP E LOOP ---
 
 void gestione_errori() {
   lv_scr_load_anim(ui_ErrorScreen, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
@@ -260,30 +252,12 @@ void setup() {
     Serial.println("Errore Connessione ELM!");
     gestione_errori();
   }
-
-  Serial.println("setup ELM completato!");
-  myELM327.sendCommand("ATZ");  // Reset
-  delay(2000);
-  myELM327.sendCommand("ATE0");  // Echo off
-  delay(500);
-  myELM327.sendCommand("ATSP5");  // CAMBIO PROTOCOLLO: Proviamo ISO 9141-2
-  delay(500);
-  myELM327.sendCommand("ATST64");  // Aumenta il timeout di risposta a 400ms
-  delay(500);
-  myELM327.sendCommand("ATSW00");  // Disabilita il wake-up automatico fastidioso
-  delay(500);
-  lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
-  unsigned long start_time = millis();
-  while (millis() - start_time < 500) {  // Ciclo di mezzo secondo
-    lv_timer_handler();
-    delay(5);
-  }
+  reinit_sequence();
 }
 
 void loop() {
   lv_timer_handler();
-
-  if (WiFi.status() == WL_CONNECTED) {
+  if (WiFi.status() == WL_CONNECTED && client.connected()) {
     test_obd_readings();
   }
   delay(5);
