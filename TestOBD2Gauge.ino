@@ -16,7 +16,9 @@ uint32_t last_obd_request_time = 0;
 const uint32_t obd_interval = 5000;  // 5 secondi come richiesto
 enum TestState { SEND_WATER,
                  READ_WATER,
-                 REINIT_BUS };
+                 SEND_OIL,
+                 READ_OIL,
+                 REINIT_ELM };
 TestState currentTest = SEND_WATER;
 uint8_t consecutive_errors = 0;
 
@@ -74,6 +76,35 @@ void WaterTemperatureReading(int temp) {
     }
   }
 }
+void OilTemperatureReading(int temp) {
+  if (ui_OilTemperatureArc != NULL) {
+    lv_arc_set_value(ui_OilTemperatureArc, temp);
+    lv_event_send(ui_OilTemperatureArc, LV_EVENT_VALUE_CHANGED, NULL);
+
+    if (temp >= 130) {
+      bool blink = (millis() % 500) < 250;
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_MAIN);
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_OilTemperatureValue, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(255, 255, 255), 0);
+    } else {
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_color_make(34, 34, 34), LV_PART_MAIN);
+    }
+
+    if (temp <= 60) {
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_color_make(255, 255, 255), 0);
+    } else if (temp > 60 && temp <= 80) {
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_palette_main(LV_PALETTE_TEAL), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_color_make(255, 255, 255), 0);
+    } else if (temp > 80 && temp <= 110) {
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_color_make(0, 180, 50), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_color_make(255, 255, 255), 0);
+    } else if (temp > 110 && temp < 130) {
+      lv_obj_set_style_arc_color(ui_OilTemperatureArc, lv_palette_main(LV_PALETTE_ORANGE), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_OilTemperatureValue, lv_palette_main(LV_PALETTE_ORANGE), 0);
+    }
+  }
+}
 
 // --- LOGICA OBD CORAZZATA ---
 
@@ -100,50 +131,103 @@ void test_obd_readings() {
     case SEND_WATER:
       if (millis() - last_obd_request_time < obd_interval) return;
 
-      while (client.available()) client.read();  // Svuota buffer prima dell'invio
-      Serial.println("\n[OBD] Invio 0105...");
-      myELM327.sendCommand("0105");
+      // Pulizia totale del socket WiFi
+      while (client.available()) client.read();
+      delay(200);
+
+      Serial.println("\n[OBD] Richiesta Acqua (0105)...");
+      client.print("0105\r");  // Invio manuale bypassando parzialmente la libreria
       last_attempt_time = millis();
       currentTest = READ_WATER;
       break;
 
     case READ_WATER:
-      if (myELM327.get_response() == ELM_SUCCESS) {
-        char responseStr[64] = { 0 };
-        for (int i = 0; i < 60; i++) responseStr[i] = (char)myELM327.payload[i];
+      if (client.available()) {
+        String resp = client.readStringUntil('>');  // L'ELM chiude sempre con '>'
+        Serial.print("[OBD] Ricevuto: ");
+        Serial.println(resp);
 
-        Serial.printf("[OBD] Raw: %s\n", responseStr);
+        if (resp.indexOf("4105") != -1) {
+          int index = resp.indexOf("4105");
+          // Estraiamo i due caratteri dopo 4105 (gestendo eventuali spazi)
+          String hex = resp.substring(index + 4, index + 6);
+          hex.trim();
+          if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);  // Fallback se c'è spazio
 
-        // Cerchiamo il codice risposta "4105" ignorando l'echo
-        char *pos = strstr(responseStr, "4105");
-        if (pos != NULL && strlen(pos) >= 6) {
-          char hexVal[3] = { pos[4], pos[5], '\0' };
-          int raw_val = (int)strtol(hexVal, NULL, 16);
-          int temp = raw_val - 40;
+          int temp = (int)strtol(hex.c_str(), NULL, 16) - 40;
 
           if (temp > -30 && temp < 150) {
             Serial.printf(">>> ACQUA OK: %d C\n", temp);
             WaterTemperatureReading(temp);
             consecutive_errors = 0;
+            last_obd_request_time = millis();
+            currentTest = SEND_WATER;
+            return;
           }
         }
-        last_obd_request_time = millis();
-        currentTest = SEND_WATER;
-      } else if (millis() - last_attempt_time > 4000) {
-        Serial.println("[OBD] Errore/Timeout!");
-        consecutive_errors++;
-        last_obd_request_time = millis();
+      }
 
-        if (consecutive_errors >= 2) {
-          currentTest = REINIT_BUS;
-        } else {
-          currentTest = SEND_WATER;
-        }
+      // Timeout manuale a 7 secondi
+      if (millis() - last_attempt_time > 7000) {
+        Serial.println("[OBD] Timeout manuale!");
+        consecutive_errors++;
+        if (consecutive_errors >= 2) currentTest = REINIT_ELM;
+        else currentTest = SEND_WATER;
+        last_obd_request_time = millis();
       }
       break;
 
-    case REINIT_BUS:
-      reinit_sequence();
+    case SEND_OIL:
+      // Aumentiamo la pausa tra acqua e olio per non intasare la K-Line
+      delay(300);
+      while (client.available()) client.read();  // Pulizia pre-invio
+
+      Serial.println("[OBD] ---> Invio 2101 (Lettura Memoria MS45)");
+      client.print("2101\r");
+      last_attempt_time = millis();
+      currentTest = READ_OIL;
+      break;
+
+    case READ_OIL:
+      if (client.available()) {
+        // Usiamo un timeout di lettura lungo per stringhe pesanti
+        String resp = client.readStringUntil('>');
+
+        int index = resp.indexOf("6101");
+        if (index != -1 && resp.length() > 116) {
+          // Analisi della stringa RAW che hai mandato:
+          // Il byte temperatura è all'offset 114 se la stringa inizia da 6101
+          String hex = resp.substring(114, 116);
+          int raw_val = (int)strtol(hex.c_str(), NULL, 16);
+          int temp = raw_val - 40;
+
+          Serial.printf(">>> OLIO OK: %d C (Hex: %s)\n", temp, hex.c_str());
+          OilTemperatureReading(temp);
+          consecutive_errors = 0;
+        } else {
+          Serial.println("[OBD] Risposta 2101 incompleta o FF");
+        }
+
+        last_obd_request_time = millis();
+        currentTest = SEND_WATER;
+      } else if (millis() - last_attempt_time > 5000) {
+        Serial.println("[OBD] !!! Timeout Olio 2101");
+        last_obd_request_time = millis();
+        currentTest = SEND_WATER;
+      }
+      break;
+
+    case REINIT_ELM:
+      Serial.println("[SYSTEM] Reset Hard...");
+      client.print("ATZ\r");
+      delay(2000);
+      client.print("ATE0\r");
+      delay(500);
+      client.print("ATS0\r");
+      delay(500);
+      client.print("ATSP5\r");
+      delay(2000);
+      consecutive_errors = 0;
       currentTest = SEND_WATER;
       last_obd_request_time = millis();
       break;
@@ -237,7 +321,7 @@ void setup() {
   int ElmAttemptNumber = 0;
   bool ElmConnected = false;
   while (ElmAttemptNumber < 5 && ElmConnected == false) {
-    if (!myELM327.begin(client, true, 4000)) {
+    if (!myELM327.begin(client, true, 2000)) {
       lv_timer_handler();
       Serial.println("error elm retrying...");
       ElmAttemptNumber = ElmAttemptNumber + 1;
@@ -252,7 +336,15 @@ void setup() {
     Serial.println("Errore Connessione ELM!");
     gestione_errori();
   }
+
+  Serial.println("setup ELM completato!");
   reinit_sequence();
+  lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  unsigned long start_time = millis();
+  while (millis() - start_time < 500) {  // Ciclo di mezzo secondo
+    lv_timer_handler();
+    delay(5);
+  }
 }
 
 void loop() {
