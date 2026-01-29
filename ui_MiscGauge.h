@@ -13,7 +13,6 @@ extern "C" {
 // SCREEN: ui_MiscGauge
 extern void ui_MiscGauge_screen_init(void);
 extern void ui_MiscGauge_screen_destroy(void);
-extern void ui_event_MiscGauge(lv_event_t * e);
 extern lv_obj_t * ui_MiscGauge;
 extern lv_obj_t * ui_MLogo;
 // CUSTOM VARIABLES

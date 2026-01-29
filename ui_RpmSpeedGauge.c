@@ -10,6 +10,10 @@ lv_obj_t * ui_RPMValue = NULL;
 lv_obj_t * ui_RPMBar = NULL;
 lv_obj_t * ui_KMHValue = NULL;
 lv_obj_t * ui_KMHLabel = NULL;
+lv_obj_t * ui_EngineLoadArc = NULL;
+lv_obj_t * ui_EngineTorqueArc = NULL;
+lv_obj_t * ui_EngineLoadValue2 = NULL;
+lv_obj_t * ui_EngineTorqueValue = NULL;
 // event funtions
 void ui_event_RpmSpeedGauge(lv_event_t * e)
 {
@@ -17,8 +21,7 @@ void ui_event_RpmSpeedGauge(lv_event_t * e)
 
     if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_LEFT) {
         lv_indev_wait_release(lv_indev_get_act());
-        _ui_screen_change(&ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250, 0,
-                          &ui_OilWaterTemperatureGauge_screen_init);
+        _ui_screen_change(&ui_EngineHealthGauge, LV_SCR_LOAD_ANIM_MOVE_LEFT, 250, 0, &ui_EngineHealthGauge_screen_init);
     }
     if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) {
         lv_indev_wait_release(lv_indev_get_act());
@@ -34,6 +37,26 @@ void ui_event_RPMBar(lv_event_t * e)
 
     if(event_code == LV_EVENT_VALUE_CHANGED) {
         _ui_slider_set_text_value(ui_RPMValue, target, "", "");
+    }
+}
+
+void ui_event_EngineLoadArc(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t * target = lv_event_get_target(e);
+
+    if(event_code == LV_EVENT_VALUE_CHANGED) {
+        _ui_arc_set_text_value(ui_WaterTemperatureValue, target, "", "");
+    }
+}
+
+void ui_event_EngineTorqueArc(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t * target = lv_event_get_target(e);
+
+    if(event_code == LV_EVENT_VALUE_CHANGED) {
+        _ui_arc_set_text_value(ui_WaterTemperatureValue, target, "", "");
     }
 }
 
@@ -94,7 +117,70 @@ void ui_RpmSpeedGauge_screen_init(void)
     lv_label_set_text(ui_KMHLabel, "KMH");
     lv_obj_set_style_text_font(ui_KMHLabel, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_EngineLoadArc = lv_arc_create(ui_RpmSpeedGauge);
+    lv_obj_set_width(ui_EngineLoadArc, 60);
+    lv_obj_set_height(ui_EngineLoadArc, 60);
+    lv_obj_set_x(ui_EngineLoadArc, -65);
+    lv_obj_set_y(ui_EngineLoadArc, 29);
+    lv_obj_set_align(ui_EngineLoadArc, LV_ALIGN_CENTER);
+    lv_obj_clear_flag(ui_EngineLoadArc, LV_OBJ_FLAG_CLICKABLE);      /// Flags
+    lv_arc_set_value(ui_EngineLoadArc, 15);
+    lv_arc_set_bg_angles(ui_EngineLoadArc, 315, 225);
+    lv_arc_set_rotation(ui_EngineLoadArc, 180);
+    lv_obj_set_style_radius(ui_EngineLoadArc, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_color(ui_EngineLoadArc, lv_color_hex(0x222222), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(ui_EngineLoadArc, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_rounded(ui_EngineLoadArc, false, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_arc_color(ui_EngineLoadArc, lv_color_hex(0x00B432), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(ui_EngineLoadArc, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_rounded(ui_EngineLoadArc, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_bg_color(ui_EngineLoadArc, lv_color_hex(0x000000), LV_PART_KNOB | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_EngineLoadArc, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
+
+    ui_EngineTorqueArc = lv_arc_create(ui_RpmSpeedGauge);
+    lv_obj_set_width(ui_EngineTorqueArc, 60);
+    lv_obj_set_height(ui_EngineTorqueArc, 60);
+    lv_obj_set_x(ui_EngineTorqueArc, 69);
+    lv_obj_set_y(ui_EngineTorqueArc, 29);
+    lv_obj_set_align(ui_EngineTorqueArc, LV_ALIGN_CENTER);
+    lv_obj_clear_flag(ui_EngineTorqueArc, LV_OBJ_FLAG_CLICKABLE);      /// Flags
+    lv_arc_set_range(ui_EngineTorqueArc, 0, 250);
+    lv_arc_set_value(ui_EngineTorqueArc, 0);
+    lv_arc_set_bg_angles(ui_EngineTorqueArc, 315, 225);
+    lv_arc_set_rotation(ui_EngineTorqueArc, 180);
+    lv_obj_set_style_radius(ui_EngineTorqueArc, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_color(ui_EngineTorqueArc, lv_color_hex(0x222222), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(ui_EngineTorqueArc, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_rounded(ui_EngineTorqueArc, false, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_arc_color(ui_EngineTorqueArc, lv_color_hex(0x00B432), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(ui_EngineTorqueArc, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_rounded(ui_EngineTorqueArc, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_bg_color(ui_EngineTorqueArc, lv_color_hex(0x000000), LV_PART_KNOB | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(ui_EngineTorqueArc, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
+
+    ui_EngineLoadValue2 = lv_label_create(ui_RpmSpeedGauge);
+    lv_obj_set_width(ui_EngineLoadValue2, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_EngineLoadValue2, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_EngineLoadValue2, -65);
+    lv_obj_set_y(ui_EngineLoadValue2, 62);
+    lv_obj_set_align(ui_EngineLoadValue2, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_EngineLoadValue2, "15%");
+
+    ui_EngineTorqueValue = lv_label_create(ui_RpmSpeedGauge);
+    lv_obj_set_width(ui_EngineTorqueValue, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_EngineTorqueValue, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_EngineTorqueValue, 69);
+    lv_obj_set_y(ui_EngineTorqueValue, 62);
+    lv_obj_set_align(ui_EngineTorqueValue, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_EngineTorqueValue, "0 Nm");
+
     lv_obj_add_event_cb(ui_RPMBar, ui_event_RPMBar, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_EngineLoadArc, ui_event_EngineLoadArc, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(ui_EngineTorqueArc, ui_event_EngineTorqueArc, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_RpmSpeedGauge, ui_event_RpmSpeedGauge, LV_EVENT_ALL, NULL);
 
 }
@@ -109,5 +195,9 @@ void ui_RpmSpeedGauge_screen_destroy(void)
     ui_RPMBar = NULL;
     ui_KMHValue = NULL;
     ui_KMHLabel = NULL;
+    ui_EngineLoadArc = NULL;
+    ui_EngineTorqueArc = NULL;
+    ui_EngineLoadValue2 = NULL;
+    ui_EngineTorqueValue = NULL;
 
 }

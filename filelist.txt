@@ -2,6 +2,7 @@ ui_MiscGauge.c
 ui_OilWaterTemperatureGauge.c
 ui_RpmSpeedGauge.c
 ui_EngineManagementGauge.c
+ui_EngineHealthGauge.c
 ui_ErrorScreen.c
 ui.c
 ui_comp_hook.c

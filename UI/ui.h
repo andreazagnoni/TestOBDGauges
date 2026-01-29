@@ -31,6 +31,7 @@ extern "C" {
 #include "ui_OilWaterTemperatureGauge.h"
 #include "ui_RpmSpeedGauge.h"
 #include "ui_EngineManagementGauge.h"
+#include "ui_EngineHealthGauge.h"
 #include "ui_ErrorScreen.h"
 
 ///////////////////// VARIABLES ////////////////////

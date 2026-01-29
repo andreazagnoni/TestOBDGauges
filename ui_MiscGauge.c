@@ -8,14 +8,6 @@
 lv_obj_t * ui_MiscGauge = NULL;
 lv_obj_t * ui_MLogo = NULL;
 // event funtions
-void ui_event_MiscGauge(lv_event_t * e)
-{
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_SCREEN_LOAD_START) {
-        LoadingAnim_Animation(ui_MLogo, 0);
-    }
-}
 
 // build funtions
 
@@ -34,8 +26,6 @@ void ui_MiscGauge_screen_init(void)
     lv_obj_add_flag(ui_MLogo, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
     lv_obj_clear_flag(ui_MLogo, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
     lv_img_set_zoom(ui_MLogo, 200);
-
-    lv_obj_add_event_cb(ui_MiscGauge, ui_event_MiscGauge, LV_EVENT_ALL, NULL);
 
 }
 

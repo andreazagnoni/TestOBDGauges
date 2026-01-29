@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include "ELMduino.h"
 
+const bool debug = true;
 // ELMDUINO
 const char *ssid = "V-LINK";
 IPAddress server(192, 168, 0, 10);
@@ -127,110 +128,109 @@ void reinit_sequence() {
 void test_obd_readings() {
   static uint32_t last_attempt_time = 0;
 
-  switch (currentTest) {
-    case SEND_WATER:
-      if (millis() - last_obd_request_time < obd_interval) return;
+  if (!debug) {
+    switch (currentTest) {
+      case SEND_WATER:
+        if (millis() - last_obd_request_time < obd_interval) return;
 
-      // Pulizia totale del socket WiFi
-      while (client.available()) client.read();
-      delay(200);
+        // Pulizia totale del socket WiFi
+        while (client.available()) client.read();
+        delay(200);
 
-      Serial.println("\n[OBD] Richiesta Acqua (0105)...");
-      client.print("0105\r");  // Invio manuale bypassando parzialmente la libreria
-      last_attempt_time = millis();
-      currentTest = READ_WATER;
-      break;
+        Serial.println("\n[OBD] Richiesta Acqua (0105)...");
+        client.print("0105\r");  // Invio manuale bypassando parzialmente la libreria
+        last_attempt_time = millis();
+        currentTest = READ_WATER;
+        break;
 
-    case READ_WATER:
-      if (client.available()) {
-        String resp = client.readStringUntil('>');  // L'ELM chiude sempre con '>'
-        Serial.print("[OBD] Ricevuto: ");
-        Serial.println(resp);
+      case READ_WATER:
+        if (client.available()) {
+          String resp = client.readStringUntil('>');  // L'ELM chiude sempre con '>'
+          Serial.print("[OBD] Ricevuto: ");
+          Serial.println(resp);
 
-        if (resp.indexOf("4105") != -1) {
-          int index = resp.indexOf("4105");
-          // Estraiamo i due caratteri dopo 4105 (gestendo eventuali spazi)
-          String hex = resp.substring(index + 4, index + 6);
-          hex.trim();
-          if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);  // Fallback se c'è spazio
+          if (resp.indexOf("4105") != -1) {
+            int index = resp.indexOf("4105");
+            // Estraiamo i due caratteri dopo 4105 (gestendo eventuali spazi)
+            String hex = resp.substring(index + 4, index + 6);
+            hex.trim();
+            if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);  // Fallback se c'è spazio
 
-          int temp = (int)strtol(hex.c_str(), NULL, 16) - 40;
+            int temp = (int)strtol(hex.c_str(), NULL, 16) - 40;
 
-          if (temp > -30 && temp < 150) {
-            Serial.printf(">>> ACQUA OK: %d C\n", temp);
-            WaterTemperatureReading(temp);
-            consecutive_errors = 0;
-            last_obd_request_time = millis();
-            currentTest = SEND_WATER;
-            return;
+            if (temp > -30 && temp < 150) {
+              Serial.printf(">>> ACQUA OK: %d C\n", temp);
+              WaterTemperatureReading(temp);
+              consecutive_errors = 0;
+              last_obd_request_time = millis();
+              currentTest = SEND_OIL;
+              return;
+            }
           }
         }
-      }
 
-      // Timeout manuale a 7 secondi
-      if (millis() - last_attempt_time > 7000) {
-        Serial.println("[OBD] Timeout manuale!");
-        consecutive_errors++;
-        if (consecutive_errors >= 2) currentTest = REINIT_ELM;
-        else currentTest = SEND_WATER;
-        last_obd_request_time = millis();
-      }
-      break;
-
-    case SEND_OIL:
-      // Aumentiamo la pausa tra acqua e olio per non intasare la K-Line
-      delay(300);
-      while (client.available()) client.read();  // Pulizia pre-invio
-
-      Serial.println("[OBD] ---> Invio 2101 (Lettura Memoria MS45)");
-      client.print("2101\r");
-      last_attempt_time = millis();
-      currentTest = READ_OIL;
-      break;
-
-    case READ_OIL:
-      if (client.available()) {
-        // Usiamo un timeout di lettura lungo per stringhe pesanti
-        String resp = client.readStringUntil('>');
-
-        int index = resp.indexOf("6101");
-        if (index != -1 && resp.length() > 116) {
-          // Analisi della stringa RAW che hai mandato:
-          // Il byte temperatura è all'offset 114 se la stringa inizia da 6101
-          String hex = resp.substring(114, 116);
-          int raw_val = (int)strtol(hex.c_str(), NULL, 16);
-          int temp = raw_val - 40;
-
-          Serial.printf(">>> OLIO OK: %d C (Hex: %s)\n", temp, hex.c_str());
-          OilTemperatureReading(temp);
-          consecutive_errors = 0;
-        } else {
-          Serial.println("[OBD] Risposta 2101 incompleta o FF");
+        // Timeout manuale a 7 secondi
+        if (millis() - last_attempt_time > 7000) {
+          Serial.println("[OBD] Timeout manuale!");
+          consecutive_errors++;
+          if (consecutive_errors >= 2) currentTest = REINIT_ELM;
+          else currentTest = SEND_OIL;
+          last_obd_request_time = millis();
         }
+        break;
 
-        last_obd_request_time = millis();
-        currentTest = SEND_WATER;
-      } else if (millis() - last_attempt_time > 5000) {
-        Serial.println("[OBD] !!! Timeout Olio 2101");
-        last_obd_request_time = millis();
-        currentTest = SEND_WATER;
-      }
-      break;
+      case SEND_OIL:
+        delay(200);
+        while (client.available()) client.read();
+        Serial.println("[OBD] ---> Analisi Olio su 2101...");
+        client.print("2101\r");
+        last_attempt_time = millis();
+        currentTest = READ_OIL;
+        break;
 
-    case REINIT_ELM:
-      Serial.println("[SYSTEM] Reset Hard...");
-      client.print("ATZ\r");
-      delay(2000);
-      client.print("ATE0\r");
-      delay(500);
-      client.print("ATS0\r");
-      delay(500);
-      client.print("ATSP5\r");
-      delay(2000);
-      consecutive_errors = 0;
-      currentTest = SEND_WATER;
-      last_obd_request_time = millis();
-      break;
+      case READ_OIL:
+        if (client.available()) {
+          String resp = client.readStringUntil('>');
+          int index = resp.indexOf("6101");
+
+          if (index != -1 && resp.length() > 100) {
+            // Cerchiamo un byte che sia coerente con una temperatura motore (es. tra 40 e 120 gradi)
+            // Nelle MS45 l'olio è spesso vicino al byte dell'acqua.
+            // Proviamo l'offset 118 (due byte dopo quello di prima)
+            String hex = resp.substring(118, 120);
+            int raw_val = (int)strtol(hex.c_str(), NULL, 16);
+            int temp = raw_val - 40;
+
+            if (temp > 20 && temp < 140) {  // Filtro di verosimiglianza
+              Serial.printf(">>> OLIO PROBABILE: %d C\n", temp);
+              OilTemperatureReading(temp);
+            }
+          }
+          last_obd_request_time = millis();
+          currentTest = SEND_WATER;
+        } else if (millis() - last_attempt_time > 4000) {
+          last_obd_request_time = millis();
+          currentTest = SEND_WATER;
+        }
+        break;
+
+      case REINIT_ELM:
+        Serial.println("[SYSTEM] Reset Hard...");
+        client.print("ATZ\r");
+        delay(2000);
+        client.print("ATE0\r");
+        delay(500);
+        client.print("ATS0\r");
+        delay(500);
+        client.print("ATSP5\r");
+        delay(2000);
+        consecutive_errors = 0;
+        currentTest = SEND_WATER;
+        last_obd_request_time = millis();
+        break;
+    }
+  } else {
+    WaterTemperatureReading(50);
   }
 }
 
@@ -283,62 +283,64 @@ void setup() {
 
   Serial.println("Setup display completato!");
 
-  WiFi.begin(ssid);
+  if (!debug) {
+    WiFi.begin(ssid);
 
-  int MaxmsRetry = 20000;
-  int startMillis = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startMillis <= MaxmsRetry) {
-    lv_timer_handler();
-    Serial.print(".");
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\nErrore Connessione Wifi!");
-    gestione_errori();
-  }
-
-  Serial.println("Connected to WiFi!");
-
-  int attemptNumber = 0;
-  bool clientConnected = false;
-  while (attemptNumber < 5 && clientConnected == false) {
-    if (client.connect(server, 35000)) {
-      clientConnected = true;
-      Serial.println("Client connected!");
-    } else {
+    int MaxmsRetry = 20000;
+    int startMillis = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - startMillis <= MaxmsRetry) {
       lv_timer_handler();
-      Serial.println("Error client retrying...");
-      attemptNumber = attemptNumber + 1;
-      delay(1000);
+      Serial.print(".");
     }
-  }
 
-  if (!clientConnected) {
-    Serial.println("Errore Connessione Client!");
-    gestione_errori();
-  }
-
-  int ElmAttemptNumber = 0;
-  bool ElmConnected = false;
-  while (ElmAttemptNumber < 5 && ElmConnected == false) {
-    if (!myELM327.begin(client, true, 2000)) {
-      lv_timer_handler();
-      Serial.println("error elm retrying...");
-      ElmAttemptNumber = ElmAttemptNumber + 1;
-      delay(1000);
-    } else {
-      Serial.println("ELM connected!");
-      ElmConnected = true;
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("\nErrore Connessione Wifi!");
+      gestione_errori();
     }
-  }
 
-  if (!ElmConnected) {
-    Serial.println("Errore Connessione ELM!");
-    gestione_errori();
-  }
+    Serial.println("Connected to WiFi!");
 
-  Serial.println("setup ELM completato!");
-  reinit_sequence();
+    int attemptNumber = 0;
+    bool clientConnected = false;
+    while (attemptNumber < 5 && clientConnected == false) {
+      if (client.connect(server, 35000)) {
+        clientConnected = true;
+        Serial.println("Client connected!");
+      } else {
+        lv_timer_handler();
+        Serial.println("Error client retrying...");
+        attemptNumber = attemptNumber + 1;
+        delay(1000);
+      }
+    }
+
+    if (!clientConnected) {
+      Serial.println("Errore Connessione Client!");
+      gestione_errori();
+    }
+
+    int ElmAttemptNumber = 0;
+    bool ElmConnected = false;
+    while (ElmAttemptNumber < 5 && ElmConnected == false) {
+      if (!myELM327.begin(client, true, 2000)) {
+        lv_timer_handler();
+        Serial.println("error elm retrying...");
+        ElmAttemptNumber = ElmAttemptNumber + 1;
+        delay(1000);
+      } else {
+        Serial.println("ELM connected!");
+        ElmConnected = true;
+      }
+    }
+
+    if (!ElmConnected) {
+      Serial.println("Errore Connessione ELM!");
+      gestione_errori();
+    }
+
+    Serial.println("setup ELM completato!");
+    reinit_sequence();
+  }
   lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
   unsigned long start_time = millis();
   while (millis() - start_time < 500) {  // Ciclo di mezzo secondo
@@ -349,7 +351,11 @@ void setup() {
 
 void loop() {
   lv_timer_handler();
-  if (WiFi.status() == WL_CONNECTED && client.connected()) {
+  if (!debug) {
+    if (WiFi.status() == WL_CONNECTED && client.connected()) {
+      test_obd_readings();
+    }
+  } else {
     test_obd_readings();
   }
   delay(5);

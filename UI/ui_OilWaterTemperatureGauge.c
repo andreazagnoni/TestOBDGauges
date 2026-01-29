@@ -24,7 +24,7 @@ void ui_event_OilWaterTemperatureGauge(lv_event_t * e)
     }
     if(event_code == LV_EVENT_GESTURE &&  lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT) {
         lv_indev_wait_release(lv_indev_get_act());
-        _ui_screen_change(&ui_RpmSpeedGauge, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 250, 0, &ui_RpmSpeedGauge_screen_init);
+        _ui_screen_change(&ui_EngineHealthGauge, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 250, 0, &ui_EngineHealthGauge_screen_init);
     }
 }
 

@@ -63,6 +63,7 @@ void ui_init(void)
     ui_OilWaterTemperatureGauge_screen_init();
     ui_RpmSpeedGauge_screen_init();
     ui_EngineManagementGauge_screen_init();
+    ui_EngineHealthGauge_screen_init();
     ui_ErrorScreen_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_MiscGauge);
@@ -74,5 +75,6 @@ void ui_destroy(void)
     ui_OilWaterTemperatureGauge_screen_destroy();
     ui_RpmSpeedGauge_screen_destroy();
     ui_EngineManagementGauge_screen_destroy();
+    ui_EngineHealthGauge_screen_destroy();
     ui_ErrorScreen_screen_destroy();
 }
