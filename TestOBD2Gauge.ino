@@ -14,11 +14,41 @@ ELM327 myELM327;
 
 // TIMER E STATI
 uint32_t last_obd_request_time = 0;
-const uint32_t obd_interval = 5000;  // 5 secondi come richiesto
+const uint32_t obd_interval_water = 5000;
+const uint32_t obd_interval_engine = 1000;
+
 enum TestState { SEND_WATER,
                  READ_WATER,
-                 SEND_OIL,
-                 READ_OIL,
+                 SEND_RPM,
+                 READ_RPM,
+                 SEND_KMH,
+                 READ_KMH,
+                 SEND_ENGINE_LOAD,
+                 READ_ENGINE_LOAD,
+                 SEND_TORQUE,
+                 READ_TORQUE,
+                 SEND_HP,
+                 READ_HP,
+                 SEND_THROTTLE,
+                 READ_THROTTLE,
+                 SEND_MAF,
+                 READ_MAF,
+                 SEND_STFT1,
+                 READ_STFT1,
+                 SEND_STFT2,
+                 READ_STFT2,
+                 SEND_ANTICIPO,
+                 READ_ANTICIPO,
+                 SEND_TEMP_ARIA,
+                 READ_TEMP_ARIA,
+                 SEND_VOLTS,
+                 READ_VOLTS,
+                 SEND_TEMP_CAT1,
+                 READ_TEMP_CAT1,
+                 SEND_TEMP_CAT2,
+                 READ_TEMP_CAT2,
+                 SEND_PRESS_BAR,
+                 READ_PRESS_BAR,
                  REINIT_ELM };
 TestState currentTest = SEND_WATER;
 uint8_t consecutive_errors = 0;
@@ -106,6 +136,53 @@ void OilTemperatureReading(int temp) {
     }
   }
 }
+void RPMReading(int rpm) {
+  if (ui_RPMBar != NULL) {
+    lv_slider_set_value(ui_RPMBar, rpm, LV_ANIM_ON);
+    lv_event_send(ui_RPMBar, LV_EVENT_VALUE_CHANGED, NULL);
+
+    if (rpm >= 6250) {
+      bool blink = (millis() % 500) < 250;
+      lv_obj_set_style_bg_color(ui_RPMBar, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_MAIN);
+      lv_obj_set_style_bg_color(ui_RPMBar, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(34, 34, 34), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_RPMValue, blink ? lv_palette_main(LV_PALETTE_RED) : lv_color_make(255, 255, 255), 0);
+    } else {
+      lv_obj_set_style_bg_color(ui_RPMBar, lv_color_make(34, 34, 34), LV_PART_MAIN);
+    }
+
+    if (rpm <= 3000) {
+      lv_obj_set_style_bg_color(ui_RPMBar, lv_color_make(0, 180, 50), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_RPMValue, lv_color_make(255, 255, 255), 0);
+    } else if (rpm > 3000 && rpm <= 5000) {
+      lv_obj_set_style_bg_color(ui_RPMBar, lv_palette_main(LV_PALETTE_BLUE), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_RPMValue, lv_color_make(255, 255, 255), 0);
+    } else if (rpm > 5000 && rpm <= 6250) {
+      lv_obj_set_style_bg_color(ui_RPMBar, lv_palette_main(LV_PALETTE_RED), LV_PART_INDICATOR);
+      lv_obj_set_style_text_color(ui_RPMValue, lv_color_make(255, 255, 255), 0);
+    }
+  }
+}
+void KMHReading(int kmh) {
+  lv_label_set_text(ui_KMHValue, String(kmh).c_str());
+}
+void ENGINE_LOADReading(int load) {
+  if (ui_EngineLoadArc != NULL) {
+    lv_arc_set_value(ui_EngineLoadArc, load);
+    lv_label_set_text_fmt(ui_EngineLoadValue2, "%d%%", load);
+  }
+}
+void TORQUEReading(int torque) {
+  if (ui_EngineTorqueArc != NULL) {
+    lv_arc_set_value(ui_EngineTorqueArc, torque);
+    lv_label_set_text_fmt(ui_EngineTorqueValue, "%d Nm", torque);
+  }
+}
+void HPReading(int hp) {
+  if (ui_EngineHpArc != NULL) {
+    lv_arc_set_value(ui_EngineHpArc, hp);
+    lv_label_set_text_fmt(ui_HPValue, "%d HP", hp);
+  }
+}
 
 // --- LOGICA OBD CORAZZATA ---
 
@@ -127,111 +204,580 @@ void reinit_sequence() {
 
 void test_obd_readings() {
   static uint32_t last_attempt_time = 0;
+  lv_obj_t *current_screen = lv_scr_act();
 
-  if (!debug) {
-    switch (currentTest) {
-      case SEND_WATER:
-        if (millis() - last_obd_request_time < obd_interval) return;
+  if (current_screen == ui_RpmSpeedGauge) {
+    currentTest = SEND_RPM;
+    if (!debug) {
+      switch (currentTest) {
+        case SEND_RPM:
+          if (millis() - last_obd_request_time < obd_interval_engine) return;
 
-        // Pulizia totale del socket WiFi
-        while (client.available()) client.read();
-        delay(200);
+          while (client.available()) client.read();
+          delay(200);
 
-        Serial.println("\n[OBD] Richiesta Acqua (0105)...");
-        client.print("0105\r");  // Invio manuale bypassando parzialmente la libreria
-        last_attempt_time = millis();
-        currentTest = READ_WATER;
-        break;
+          Serial.println("\n[OBD] Richiesta RPM (010C)...");
+          client.print("010C\r");
+          last_attempt_time = millis();
+          currentTest = READ_RPM;
+          break;
+        case READ_RPM:
+          if (client.available()) {
+            String resp = client.readStringUntil('>');
+            Serial.print("[OBD] Ricevuto: ");
+            Serial.println(resp);
 
-      case READ_WATER:
-        if (client.available()) {
-          String resp = client.readStringUntil('>');  // L'ELM chiude sempre con '>'
-          Serial.print("[OBD] Ricevuto: ");
-          Serial.println(resp);
+            if (resp.indexOf("410C") != -1) {
+              int index = resp.indexOf("410C");
+              String hexA = resp.substring(index + 4, index + 6);
+              String hexB = resp.substring(index + 6, index + 8);
 
-          if (resp.indexOf("4105") != -1) {
-            int index = resp.indexOf("4105");
-            // Estraiamo i due caratteri dopo 4105 (gestendo eventuali spazi)
-            String hex = resp.substring(index + 4, index + 6);
-            hex.trim();
-            if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);  // Fallback se c'è spazio
+              hexA.trim();
+              hexB.trim();
+              long A = strtol(hexA.c_str(), NULL, 16);
+              long B = strtol(hexB.c_str(), NULL, 16);
 
-            int temp = (int)strtol(hex.c_str(), NULL, 16) - 40;
+              // Formula Standard OBD RPM: ((A*256)+B)/4
+              int rpm = (int)((A * 256) + B) / 4;
 
-            if (temp > -30 && temp < 150) {
-              Serial.printf(">>> ACQUA OK: %d C\n", temp);
-              WaterTemperatureReading(temp);
-              consecutive_errors = 0;
-              last_obd_request_time = millis();
-              currentTest = SEND_OIL;
-              return;
+              if (rpm >= 0 && rpm < 7000) {
+                Serial.printf(">>> RPM OK: %d \n", rpm);
+                RPMReading(rpm);
+                consecutive_errors = 0;
+                last_obd_request_time = millis();
+                currentTest = SEND_KMH;
+                return;
+              }
             }
+          } else if (millis() - last_attempt_time > 3000) {
+            last_obd_request_time = millis();
+            currentTest = SEND_KMH;
           }
-        }
+          break;
+        case SEND_KMH:
+          if (millis() - last_obd_request_time < obd_interval_engine) return;
 
-        // Timeout manuale a 7 secondi
-        if (millis() - last_attempt_time > 7000) {
-          Serial.println("[OBD] Timeout manuale!");
-          consecutive_errors++;
-          if (consecutive_errors >= 2) currentTest = REINIT_ELM;
-          else currentTest = SEND_OIL;
-          last_obd_request_time = millis();
-        }
-        break;
+          while (client.available()) client.read();
+          delay(200);
 
-      case SEND_OIL:
-        delay(200);
-        while (client.available()) client.read();
-        Serial.println("[OBD] ---> Analisi Olio su 2101...");
-        client.print("2101\r");
-        last_attempt_time = millis();
-        currentTest = READ_OIL;
-        break;
+          Serial.println("\n[OBD] Richiesta KMH (010D)...");
+          client.print("010D\r");
+          last_attempt_time = millis();
+          currentTest = READ_KMH;
+          break;
+        case READ_KMH:
+          if (client.available()) {
+            String resp = client.readStringUntil('>');
+            Serial.print("[OBD] Ricevuto: ");
+            Serial.println(resp);
 
-      case READ_OIL:
-        if (client.available()) {
-          String resp = client.readStringUntil('>');
-          int index = resp.indexOf("6101");
+            if (resp.indexOf("410D") != -1) {
+              int index = resp.indexOf("410D");
+              String hex = resp.substring(index + 4, index + 6);
+              hex.trim();
+              if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
 
-          if (index != -1 && resp.length() > 100) {
-            // Cerchiamo un byte che sia coerente con una temperatura motore (es. tra 40 e 120 gradi)
-            // Nelle MS45 l'olio è spesso vicino al byte dell'acqua.
-            // Proviamo l'offset 118 (due byte dopo quello di prima)
-            String hex = resp.substring(118, 120);
-            int raw_val = (int)strtol(hex.c_str(), NULL, 16);
-            int temp = raw_val - 40;
+              int kmh = (int)strtol(hex.c_str(), NULL, 16);
 
-            if (temp > 20 && temp < 140) {  // Filtro di verosimiglianza
-              Serial.printf(">>> OLIO PROBABILE: %d C\n", temp);
-              OilTemperatureReading(temp);
+              if (kmh >= 0 && kmh < 300) {
+                Serial.printf(">>> KMH OK: %d \n", kmh);
+                KMHReading(kmh);
+                consecutive_errors = 0;
+                last_obd_request_time = millis();
+                currentTest = SEND_ENGINE_LOAD;
+                return;
+              }
             }
+          } else if (millis() - last_attempt_time > 3000) {
+            last_obd_request_time = millis();
+            currentTest = SEND_ENGINE_LOAD;
           }
-          last_obd_request_time = millis();
-          currentTest = SEND_WATER;
-        } else if (millis() - last_attempt_time > 4000) {
-          last_obd_request_time = millis();
-          currentTest = SEND_WATER;
-        }
-        break;
+          break;
 
-      case REINIT_ELM:
-        Serial.println("[SYSTEM] Reset Hard...");
-        client.print("ATZ\r");
-        delay(2000);
-        client.print("ATE0\r");
-        delay(500);
-        client.print("ATS0\r");
-        delay(500);
-        client.print("ATSP5\r");
-        delay(2000);
-        consecutive_errors = 0;
-        currentTest = SEND_WATER;
-        last_obd_request_time = millis();
-        break;
+        case SEND_ENGINE_LOAD:
+          if (millis() - last_obd_request_time < obd_interval_engine) return;
+
+          while (client.available()) client.read();
+          delay(200);
+
+          Serial.println("\n[OBD] Richiesta ENGINE_LOAD (0104)...");
+          client.print("0104\r");
+          last_attempt_time = millis();
+          currentTest = READ_ENGINE_LOAD;
+          break;
+        case READ_ENGINE_LOAD:
+          if (client.available()) {
+            String resp = client.readStringUntil('>');
+            Serial.print("[OBD] Ricevuto: ");
+            Serial.println(resp);
+
+            if (resp.indexOf("4104") != -1) {
+              int index = resp.indexOf("4104");
+              String hex = resp.substring(index + 4, index + 6);
+              hex.trim();
+              if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+              int load = ((int)strtol(hex.c_str(), NULL, 16) * 100) / 255;
+
+              if (load >= 0 && load < 110) {
+                Serial.printf(">>> ENGINE_LOAD OK: %d \n", load);
+                ENGINE_LOADReading(load);
+                consecutive_errors = 0;
+                last_obd_request_time = millis();
+                currentTest = SEND_TORQUE;
+                return;
+              }
+            }
+          } else if (millis() - last_attempt_time > 3000) {
+            last_obd_request_time = millis();
+            currentTest = SEND_TORQUE;
+          }
+          break;
+        case SEND_TORQUE:
+          if (millis() - last_obd_request_time < obd_interval_engine) return;
+
+          while (client.available()) client.read();
+          delay(200);
+
+          Serial.println("\n[OBD] Richiesta TORQUE (0162)...");
+          client.print("0162\r");
+          last_attempt_time = millis();
+          currentTest = READ_TORQUE;
+          break;
+        case READ_TORQUE:
+          if (client.available()) {
+            String resp = client.readStringUntil('>');
+            Serial.print("[OBD] Ricevuto: ");
+            Serial.println(resp);
+
+            if (resp.indexOf("4162") != -1) {
+              int index = resp.indexOf("4162");
+              String hex = resp.substring(index + 4, index + 6);
+              hex.trim();
+              if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+              int torque = ((int)strtol(hex.c_str(), NULL, 16) * 245) / 255;
+
+              if (torque >= 0 && torque < 250) {
+                Serial.printf(">>> TORQUE OK: %d \n", torque);
+                TORQUEReading(torque);
+                consecutive_errors = 0;
+                last_obd_request_time = millis();
+                currentTest = SEND_HP;
+                return;
+              }
+            }
+          } else if (millis() - last_attempt_time > 3000) {
+            last_obd_request_time = millis();
+            currentTest = SEND_HP;
+          }
+          break;
+        case SEND_HP:
+          if (millis() - last_obd_request_time < obd_interval_engine) return;
+
+          while (client.available()) client.read();
+          delay(200);
+
+          Serial.println("\n[OBD] Richiesta HP (maf 0110)...");
+          client.print("0110\r");
+          last_attempt_time = millis();
+          currentTest = READ_HP;
+          break;
+        case READ_HP:
+          if (client.available()) {
+            String resp = client.readStringUntil('>');
+            Serial.print("[OBD] Ricevuto: ");
+            Serial.println(resp);
+
+            if (resp.indexOf("4110") != -1) {
+              int index = resp.indexOf("4110");
+              String hexA = resp.substring(index + 4, index + 6);
+              String hexB = resp.substring(index + 6, index + 8);
+
+              hexA.trim();
+              hexB.trim();
+              long A = strtol(hexA.c_str(), NULL, 16);
+              long B = strtol(hexB.c_str(), NULL, 16);
+
+              int hp = (((A * 256) + B) / 100) / 0.81;
+
+              if (hp >= 0 && hp < 250) {
+                Serial.printf(">>> TORQUE OK: %d \n", hp);
+                HPReading(hp);
+                consecutive_errors = 0;
+                last_obd_request_time = millis();
+                currentTest = SEND_RPM;
+                return;
+              }
+            }
+          } else if (millis() - last_attempt_time > 3000) {
+            last_obd_request_time = millis();
+            currentTest = SEND_RPM;
+          }
+          break;
+
+        case REINIT_ELM:
+          Serial.println("[SYSTEM] Reset Hard...");
+          client.print("ATZ\r");
+          delay(2000);
+          client.print("ATE0\r");
+          delay(500);
+          client.print("ATS0\r");
+          delay(500);
+          client.print("ATSP5\r");
+          delay(2000);
+          consecutive_errors = 0;
+          currentTest = SEND_RPM;
+          last_obd_request_time = millis();
+          break;
+      }
+    } else {
+      RPMReading(2000);
+      KMHReading(100);
+      ENGINE_LOADReading(80);
+      TORQUEReading(200);
+      HPReading(100);
     }
-  } else {
-    WaterTemperatureReading(50);
+  } else if (current_screen == ui_OilWaterTemperatureGauge) {
+    if (!debug) {
+      currentTest = SEND_WATER;
+      switch (currentTest) {
+        case SEND_WATER:
+          if (millis() - last_obd_request_time < obd_interval_water) return;
+
+          while (client.available()) client.read();
+          delay(200);
+
+          Serial.println("\n[OBD] Richiesta Acqua (0105)...");
+          client.print("0105\r");
+          last_attempt_time = millis();
+          currentTest = READ_WATER;
+          break;
+
+        case READ_WATER:
+          if (client.available()) {
+            String resp = client.readStringUntil('>');
+            Serial.print("[OBD] Ricevuto: ");
+            Serial.println(resp);
+
+            if (resp.indexOf("4105") != -1) {
+              int index = resp.indexOf("4105");
+              String hex = resp.substring(index + 4, index + 6);
+              hex.trim();
+              if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+              int temp = (int)strtol(hex.c_str(), NULL, 16) - 40;
+
+              if (temp > -30 && temp < 150) {
+                Serial.printf(">>> ACQUA OK: %d C\n", temp);
+                WaterTemperatureReading(temp);
+                consecutive_errors = 0;
+                last_obd_request_time = millis();
+                currentTest = SEND_WATER;
+                return;
+              }
+            }
+          } else if (millis() - last_attempt_time > 3000) {
+            last_obd_request_time = millis();
+            currentTest = SEND_WATER;
+          }
+          break;
+
+        case REINIT_ELM:
+          Serial.println("[SYSTEM] Reset Hard...");
+          client.print("ATZ\r");
+          delay(2000);
+          client.print("ATE0\r");
+          delay(500);
+          client.print("ATS0\r");
+          delay(500);
+          client.print("ATSP5\r");
+          delay(2000);
+          consecutive_errors = 0;
+          currentTest = SEND_WATER;
+          last_obd_request_time = millis();
+          break;
+      }
+    } else {
+      WaterTemperatureReading(50);
+    }
+  } else if (current_screen == ui_EngineManagementGauge){
+
+  } else if (current_screen == ui_EngineHealthGauge) {
+    
   }
+  // if (!debug) {
+  //   switch (currentTest) {
+  //     case SEND_WATER:
+  //       if (millis() - last_obd_request_time < obd_interval) return;
+
+  //       while (client.available()) client.read();
+  //       delay(200);
+
+  //       Serial.println("\n[OBD] Richiesta Acqua (0105)...");
+  //       client.print("0105\r");
+  //       last_attempt_time = millis();
+  //       currentTest = READ_WATER;
+  //       break;
+
+  //     case READ_WATER:
+  //       if (client.available()) {
+  //         String resp = client.readStringUntil('>');
+  //         Serial.print("[OBD] Ricevuto: ");
+  //         Serial.println(resp);
+
+  //         if (resp.indexOf("4105") != -1) {
+  //           int index = resp.indexOf("4105");
+  //           String hex = resp.substring(index + 4, index + 6);
+  //           hex.trim();
+  //           if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+  //           int temp = (int)strtol(hex.c_str(), NULL, 16) - 40;
+
+  //           if (temp > -30 && temp < 150) {
+  //             Serial.printf(">>> ACQUA OK: %d C\n", temp);
+  //             WaterTemperatureReading(temp);
+  //             consecutive_errors = 0;
+  //             last_obd_request_time = millis();
+  //             currentTest = SEND_WATER;
+  //             return;
+  //           }
+  //         }
+  //       } else if (millis() - last_attempt_time > 3000) {
+  //         last_obd_request_time = millis();
+  //         currentTest = SEND_WATER;
+  //       }
+  //       break;
+
+  //     case SEND_RPM:
+  //       if (millis() - last_obd_request_time < obd_interval) return;
+
+  //       while (client.available()) client.read();
+  //       delay(200);
+
+  //       Serial.println("\n[OBD] Richiesta RPM (010C)...");
+  //       client.print("010C\r");
+  //       last_attempt_time = millis();
+  //       currentTest = READ_RPM;
+  //       break;
+  //     case READ_RPM:
+  //       if (client.available()) {
+  //         String resp = client.readStringUntil('>');
+  //         Serial.print("[OBD] Ricevuto: ");
+  //         Serial.println(resp);
+
+  //         if (resp.indexOf("410C") != -1) {
+  //           int index = resp.indexOf("410C");
+  //           String hexA = resp.substring(index + 4, index + 6);
+  //           String hexB = resp.substring(index + 6, index + 8);
+
+  //           hexA.trim();
+  //           hexB.trim();
+  //           long A = strtol(hexA.c_str(), NULL, 16);
+  //           long B = strtol(hexB.c_str(), NULL, 16);
+
+  //           // Formula Standard OBD RPM: ((A*256)+B)/4
+  //           int rpm = (int)((A * 256) + B) / 4;
+
+  //           if (rpm >= 0 && rpm < 7000) {
+  //             Serial.printf(">>> RPM OK: %d \n", rpm);
+  //             RPMReading(rpm);
+  //             consecutive_errors = 0;
+  //             last_obd_request_time = millis();
+  //             currentTest = SEND_KMH;
+  //             return;
+  //           }
+  //         }
+  //       } else if (millis() - last_attempt_time > 3000) {
+  //         last_obd_request_time = millis();
+  //         currentTest = SEND_KMH;
+  //       }
+  //       break;
+  //     case SEND_KMH:
+  //       if (millis() - last_obd_request_time < obd_interval) return;
+
+  //       while (client.available()) client.read();
+  //       delay(200);
+
+  //       Serial.println("\n[OBD] Richiesta KMH (010D)...");
+  //       client.print("010D\r");
+  //       last_attempt_time = millis();
+  //       currentTest = READ_KMH;
+  //       break;
+  //     case READ_KMH:
+  //       if (client.available()) {
+  //         String resp = client.readStringUntil('>');
+  //         Serial.print("[OBD] Ricevuto: ");
+  //         Serial.println(resp);
+
+  //         if (resp.indexOf("410D") != -1) {
+  //           int index = resp.indexOf("410D");
+  //           String hex = resp.substring(index + 4, index + 6);
+  //           hex.trim();
+  //           if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+  //           int kmh = (int)strtol(hex.c_str(), NULL, 16);
+
+  //           if (kmh >= 0 && kmh < 300) {
+  //             Serial.printf(">>> KMH OK: %d \n", kmh);
+  //             KMHReading(kmh);
+  //             consecutive_errors = 0;
+  //             last_obd_request_time = millis();
+  //             currentTest = SEND_ENGINE_LOAD;
+  //             return;
+  //           }
+  //         }
+  //       } else if (millis() - last_attempt_time > 3000) {
+  //         last_obd_request_time = millis();
+  //         currentTest = SEND_ENGINE_LOAD;
+  //       }
+  //       break;
+
+  //     case SEND_ENGINE_LOAD:
+  //       if (millis() - last_obd_request_time < obd_interval) return;
+
+  //       while (client.available()) client.read();
+  //       delay(200);
+
+  //       Serial.println("\n[OBD] Richiesta ENGINE_LOAD (0104)...");
+  //       client.print("0104\r");
+  //       last_attempt_time = millis();
+  //       currentTest = READ_ENGINE_LOAD;
+  //       break;
+  //     case READ_ENGINE_LOAD:
+  //       if (client.available()) {
+  //         String resp = client.readStringUntil('>');
+  //         Serial.print("[OBD] Ricevuto: ");
+  //         Serial.println(resp);
+
+  //         if (resp.indexOf("4104") != -1) {
+  //           int index = resp.indexOf("4104");
+  //           String hex = resp.substring(index + 4, index + 6);
+  //           hex.trim();
+  //           if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+  //           int load = ((int)strtol(hex.c_str(), NULL, 16) * 100) / 255;
+
+  //           if (load >= 0 && load < 110) {
+  //             Serial.printf(">>> ENGINE_LOAD OK: %d \n", load);
+  //             ENGINE_LOADReading(load);
+  //             consecutive_errors = 0;
+  //             last_obd_request_time = millis();
+  //             currentTest = SEND_TORQUE;
+  //             return;
+  //           }
+  //         }
+  //       } else if (millis() - last_attempt_time > 3000) {
+  //         last_obd_request_time = millis();
+  //         currentTest = SEND_TORQUE;
+  //       }
+  //       break;
+  //     case SEND_TORQUE:
+  //       if (millis() - last_obd_request_time < obd_interval) return;
+
+  //       while (client.available()) client.read();
+  //       delay(200);
+
+  //       Serial.println("\n[OBD] Richiesta TORQUE (0162)...");
+  //       client.print("0162\r");
+  //       last_attempt_time = millis();
+  //       currentTest = READ_TORQUE;
+  //       break;
+  //     case READ_TORQUE:
+  //       if (client.available()) {
+  //         String resp = client.readStringUntil('>');
+  //         Serial.print("[OBD] Ricevuto: ");
+  //         Serial.println(resp);
+
+  //         if (resp.indexOf("4162") != -1) {
+  //           int index = resp.indexOf("4162");
+  //           String hex = resp.substring(index + 4, index + 6);
+  //           hex.trim();
+  //           if (hex.length() < 2) hex = resp.substring(index + 5, index + 7);
+
+  //           int torque = ((int)strtol(hex.c_str(), NULL, 16) * 245) / 255;
+
+  //           if (torque >= 0 && torque < 250) {
+  //             Serial.printf(">>> TORQUE OK: %d \n", torque);
+  //             TORQUEReading(torque);
+  //             consecutive_errors = 0;
+  //             last_obd_request_time = millis();
+  //             currentTest = SEND_HP;
+  //             return;
+  //           }
+  //         }
+  //       } else if (millis() - last_attempt_time > 3000) {
+  //         last_obd_request_time = millis();
+  //         currentTest = SEND_HP;
+  //       }
+  //       break;
+  //     case SEND_HP:
+  //       if (millis() - last_obd_request_time < obd_interval) return;
+
+  //       while (client.available()) client.read();
+  //       delay(200);
+
+  //       Serial.println("\n[OBD] Richiesta HP (maf 0110)...");
+  //       client.print("0110\r");
+  //       last_attempt_time = millis();
+  //       currentTest = READ_HP;
+  //       break;
+  //     case READ_HP:
+  //       if (client.available()) {
+  //         String resp = client.readStringUntil('>');
+  //         Serial.print("[OBD] Ricevuto: ");
+  //         Serial.println(resp);
+
+  //         if (resp.indexOf("4110") != -1) {
+  //           int index = resp.indexOf("4110");
+  //           String hexA = resp.substring(index + 4, index + 6);
+  //           String hexB = resp.substring(index + 6, index + 8);
+
+  //           hexA.trim();
+  //           hexB.trim();
+  //           long A = strtol(hexA.c_str(), NULL, 16);
+  //           long B = strtol(hexB.c_str(), NULL, 16);
+
+  //           int hp = (((A * 256) + B) / 100) / 0.81;
+
+  //           if (hp >= 0 && hp < 250) {
+  //             Serial.printf(">>> TORQUE OK: %d \n", hp);
+  //             HPReading(hp);
+  //             consecutive_errors = 0;
+  //             last_obd_request_time = millis();
+  //             currentTest = SEND_WATER;
+  //             return;
+  //           }
+  //         }
+  //       } else if (millis() - last_attempt_time > 3000) {
+  //         last_obd_request_time = millis();
+  //         currentTest = SEND_WATER;
+  //       }
+  //       break;
+
+  //     case REINIT_ELM:
+  //       Serial.println("[SYSTEM] Reset Hard...");
+  //       client.print("ATZ\r");
+  //       delay(2000);
+  //       client.print("ATE0\r");
+  //       delay(500);
+  //       client.print("ATS0\r");
+  //       delay(500);
+  //       client.print("ATSP5\r");
+  //       delay(2000);
+  //       consecutive_errors = 0;
+  //       currentTest = SEND_WATER;
+  //       last_obd_request_time = millis();
+  //       break;
+  //   }
+  // } else {
+  //   WaterTemperatureReading(50);
+  //   RPMReading(2000);
+  //   KMHReading(100);
+  //   ENGINE_LOADReading(80);
+  //   TORQUEReading(200);
+  //   HPReading(100);
+  // }
 }
 
 // --- SETUP E LOOP ---
@@ -341,7 +887,7 @@ void setup() {
     Serial.println("setup ELM completato!");
     reinit_sequence();
   }
-  lv_scr_load_anim(ui_OilWaterTemperatureGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
+  lv_scr_load_anim(ui_RpmSpeedGauge, LV_SCR_LOAD_ANIM_FADE_ON, 250, 0, false);
   unsigned long start_time = millis();
   while (millis() - start_time < 500) {  // Ciclo di mezzo secondo
     lv_timer_handler();

@@ -20,12 +20,15 @@ extern void ui_event_RPMBar(lv_event_t * e);
 extern lv_obj_t * ui_RPMBar;
 extern lv_obj_t * ui_KMHValue;
 extern lv_obj_t * ui_KMHLabel;
-extern void ui_event_EngineLoadArc(lv_event_t * e);
-extern lv_obj_t * ui_EngineLoadArc;
-extern void ui_event_EngineTorqueArc(lv_event_t * e);
-extern lv_obj_t * ui_EngineTorqueArc;
 extern lv_obj_t * ui_EngineLoadValue2;
 extern lv_obj_t * ui_EngineTorqueValue;
+extern lv_obj_t * ui_HPValue;
+extern void ui_event_EngineLoadArc(lv_event_t * e);
+extern lv_obj_t * ui_EngineLoadArc;
+extern void ui_event_EngineHpArc(lv_event_t * e);
+extern lv_obj_t * ui_EngineHpArc;
+extern void ui_event_EngineTorqueArc(lv_event_t * e);
+extern lv_obj_t * ui_EngineTorqueArc;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus
